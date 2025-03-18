@@ -27,47 +27,45 @@ steps:
       git remote add github https://$(GH_TOKEN)@github.com/Truin-kyash/Tru-Sync.git
       git remote add azure https://$(AZURE_PAT)@dev.azure.com/suyashkeshari20010558/Repository%20Sync/_git/Tru-Sync
 
-      # Verify remotes
-      git remote show github || { echo "GitHub remote setup failed"; exit 1; }
-      git remote show azure || { echo "Azure DevOps remote setup failed"; exit 1; }
-    displayName: "Set Up & Verify Git Remotes"
+      # Set Git to rebase when pulling (prevents unnecessary merge commits)
+      git config --global pull.rebase true
+    displayName: "Configure Git User & Merge Strategy"
 
   - script: |
-      echo "Cleaning up and verifying repository..."
+      echo "Setting up Git remotes..."
       
-      git reset --hard  # Discard any local changes
-      git clean -fd     # Remove untracked files and directories
-      git gc --prune=now  # Garbage collect old objects
-      git fsck --full  # Check repository integrity
+      git remote remove github || true
+      git remote add github https://$(GH_TOKEN)@github.com/Truin-kyash/Tru-Sync.git
 
-      echo "Fetching from Azure DevOps..."
-      git fetch azure --prune || { echo "Failed to fetch from Azure DevOps"; exit 1; }
-    displayName: "Verify and Clean Repository"
+      git remote remove azure || true
+      git remote add azure https://$(AZURE_PAT)@dev.azure.com/suyashkeshari20010558/Repository%20Sync/_git/Tru-Sync
+    displayName: "Set Up Git Remotes"
 
   - script: |
-      echo "Fetching and syncing all branches from Azure DevOps to GitHub..."
-
-      # Get list of branches from Azure DevOps
-      BRANCHES=$(git branch -r | grep -o 'azure/.*' | cut -d '/' -f2-)
+      echo "Fetching latest updates from Azure DevOps..."
+      
+      # Fetch all branches from Azure
+      git fetch azure --prune
+      
+      # Get all branch names from Azure
+      BRANCHES=$(git branch -r | grep 'azure/' | sed 's/azure\///')
 
       for BRANCH in $BRANCHES; do
         echo "Processing branch: $BRANCH"
 
-        # Checkout the branch, force cleanup if needed
-        git checkout -B "$BRANCH" "azure/$BRANCH" || {
-          echo "Failed to checkout $BRANCH. Resetting and retrying..."
-          git reset --hard
-          git clean -fd
-          git checkout -B "$BRANCH" "azure/$BRANCH" || {
-            echo "Checkout failed again, skipping branch: $BRANCH"
-            continue
-          }
+        # Checkout the branch locally
+        git checkout -B $BRANCH azure/$BRANCH || {
+          echo "Failed to checkout $BRANCH, skipping."
+          continue
         }
 
-        # Rebase latest changes from Azure
-        git pull --rebase azure "$BRANCH" || echo "No updates for $BRANCH."
+        # Pull latest changes
+        git pull --rebase azure $BRANCH || echo "No updates for $BRANCH from Azure."
 
-        # Repack Git objects to fix potential corruption
-        git repack -a -d
-        
+        # Push to GitHub with the exact same branch name
+        if ! git push github $BRANCH; then
+          echo "Push failed for branch: $BRANCH. Skipping..."
+          continue
+        fi
+      done
     displayName: "Sync All Azure DevOps Branches to GitHub"
