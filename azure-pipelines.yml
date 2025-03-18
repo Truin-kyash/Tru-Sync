@@ -1,0 +1,83 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+trigger:
+  branches:
+    include:
+      - "*"
+
+pool:
+  name: 'Default'
+
+steps:
+  - script: |
+      git config --global user.name "Truin-kyash"
+      git config --global user.email "suyash.keshari@truinc.com"
+    displayName: "Configure Git User"
+
+  - script: |
+      echo "Setting up Git remotes..."
+      
+      # Remove remotes if they exist
+      git remote remove github 2>/dev/null || true
+      git remote remove azure 2>/dev/null || true
+
+      # Add remotes
+      git remote add github https://$(GH_TOKEN)@github.com/Truin-kyash/Tru-Sync.git
+      git remote add azure https://$(AZURE_PAT)@dev.azure.com/suyashkeshari20010558/Repository%20Sync/_git/Tru-Sync
+
+      # Verify remotes
+      git remote show github || { echo "GitHub remote setup failed"; exit 1; }
+      git remote show azure || { echo "Azure DevOps remote setup failed"; exit 1; }
+    displayName: "Set Up & Verify Git Remotes"
+
+  - script: |
+      echo "Cleaning up and verifying repository..."
+      
+      git reset --hard  # Discard any local changes
+      git clean -fd     # Remove untracked files and directories
+      git gc --prune=now  # Garbage collect old objects
+      git fsck --full  # Check repository integrity
+
+      echo "Fetching from Azure DevOps..."
+      git fetch azure --prune || { echo "Failed to fetch from Azure DevOps"; exit 1; }
+    displayName: "Verify and Clean Repository"
+
+  - script: |
+      echo "Fetching and syncing all branches from Azure DevOps to GitHub..."
+
+      # Get list of branches from Azure DevOps
+      BRANCHES=$(git branch -r | grep -o 'azure/.*' | cut -d '/' -f2-)
+
+      for BRANCH in $BRANCHES; do
+        echo "Processing branch: $BRANCH"
+
+        # Checkout the branch, force cleanup if needed
+        git checkout -B "$BRANCH" "azure/$BRANCH" || {
+          echo "Failed to checkout $BRANCH. Resetting and retrying..."
+          git reset --hard
+          git clean -fd
+          git checkout -B "$BRANCH" "azure/$BRANCH" || {
+            echo "Checkout failed again, skipping branch: $BRANCH"
+            continue
+          }
+        }
+
+        # Rebase latest changes from Azure
+        git pull --rebase azure "$BRANCH" || echo "No updates for $BRANCH."
+
+        # Repack Git objects to fix potential corruption
+        git repack -a -d
+
+        # Attempt to push to GitHub with retries
+        if ! git push --force github "$BRANCH"; then
+          echo "Push failed for branch: $BRANCH. Retrying..."
+          sleep 5  # Brief pause before retrying
+          if ! git push --force github "$BRANCH"; then
+            echo "Final push attempt failed for branch: $BRANCH. Skipping..."
+            continue
+          fi
+        fi
+      done
+    displayName: "Sync All Azure DevOps Branches to GitHub"
