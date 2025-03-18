@@ -69,15 +69,5 @@ steps:
 
         # Repack Git objects to fix potential corruption
         git repack -a -d
-
-        # Attempt to push to GitHub with retries
-        if ! git push --force github "$BRANCH"; then
-          echo "Push failed for branch: $BRANCH. Retrying..."
-          sleep 5  # Brief pause before retrying
-          if ! git push --force github "$BRANCH"; then
-            echo "Final push attempt failed for branch: $BRANCH. Skipping..."
-            continue
-          fi
-        fi
-      done
+        
     displayName: "Sync All Azure DevOps Branches to GitHub"
