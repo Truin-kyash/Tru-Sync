@@ -1,0 +1,9 @@
+project_name    = "cas"
+environment     = "dev"
+region          = "East US"
+location        = "eastus2"
+location_prefix = "eu"
+subscription_id = "94eb1620-1ab5-4f1f-8556-aaa60252291c"
+vnet_address    = ["10.0.0.0/16"]
+tenant_id       = "e85af557-9377-4a1b-a455-72bd1ceca8de"
+parent_workspace_name = "cas-eu-dev-y2d8kv-ai-hub"
