@@ -39,40 +39,51 @@ steps:
 
   - script: |
       echo "Syncing branches between Azure DevOps and GitHub..."
-      
+
+      # Ensure a clean working directory before starting
+      git reset --hard
+      git clean -fd
+
       # Get list of branches from both remotes
       BRANCHES=$(git branch -r | grep -E 'azure/|github/' | sed -E 's/^[ ]+|azure\/|github\///g' | sort -u)
 
       for BRANCH in $BRANCHES; do
         echo "Processing branch: $BRANCH"
 
+        # Ensure we are on a clean branch
+        git reset --hard
+        git clean -fd
+
         # Ensure the branch exists in both remotes
         EXISTS_IN_AZURE=$(git branch -r | grep "azure/$BRANCH")
         EXISTS_IN_GITHUB=$(git branch -r | grep "github/$BRANCH")
 
-        # Checkout the branch locally
+        # Checkout or create the branch
         git checkout -B "$BRANCH" || {
           echo "Failed to checkout $BRANCH, skipping..."
           continue
         }
 
-        # Sync from Azure to GitHub
+        # Pull latest changes from Azure first
         if [ -n "$EXISTS_IN_AZURE" ]; then
           echo "Pulling latest changes from Azure DevOps..."
-          git pull --rebase azure "$BRANCH" || echo "No updates from Azure."
+          git pull --rebase --autostash azure "$BRANCH" || echo "No updates from Azure."
         fi
 
-        # Sync from GitHub to Azure
+        # Pull latest changes from GitHub
         if [ -n "$EXISTS_IN_GITHUB" ]; then
           echo "Pulling latest changes from GitHub..."
-          git pull --rebase github "$BRANCH" || echo "No updates from GitHub."
+          git pull --rebase --autostash github "$BRANCH" || echo "No updates from GitHub."
         fi
 
-        # Push to both remotes to ensure full sync
-        if ! git push github "$BRANCH"; then
+        # Repack Git objects to fix potential corruption
+        git repack -a -d
+
+        # Push to both remotes with force to keep them in sync
+        if ! git push --force github "$BRANCH"; then
           echo "Push to GitHub failed for branch: $BRANCH, skipping..."
         fi
-        if ! git push azure "$BRANCH"; then
+        if ! git push --force azure "$BRANCH"; then
           echo "Push to Azure failed for branch: $BRANCH, skipping..."
         fi
       done
