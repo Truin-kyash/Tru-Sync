@@ -14,58 +14,66 @@ steps:
   - script: |
       git config --global user.name "Truin-kyash"
       git config --global user.email "suyash.keshari@truinc.com"
-    displayName: "Configure Git User"
-
-  - script: |
-      echo "Setting up Git remotes..."
-      
-      # Remove remotes if they exist
-      git remote remove github 2>/dev/null || true
-      git remote remove azure 2>/dev/null || true
-
-      # Add remotes
-      git remote add github https://$(GH_TOKEN)@github.com/Truin-kyash/Tru-Sync.git
-      git remote add azure https://$(AZURE_PAT)@dev.azure.com/suyashkeshari20010558/Repository%20Sync/_git/Tru-Sync
-
-      # Set Git to rebase when pulling (prevents unnecessary merge commits)
       git config --global pull.rebase true
     displayName: "Configure Git User & Merge Strategy"
 
   - script: |
       echo "Setting up Git remotes..."
       
-      git remote remove github || true
-      git remote add github https://$(GH_TOKEN)@github.com/Truin-kyash/Tru-Sync.git
+      # Remove existing remotes
+      git remote remove github 2>/dev/null || true
+      git remote remove azure 2>/dev/null || true
 
-      git remote remove azure || true
+      # Add GitHub and Azure DevOps remotes
+      git remote add github https://$(GH_TOKEN)@github.com/Truin-kyash/Tru-Sync.git
       git remote add azure https://$(AZURE_PAT)@dev.azure.com/suyashkeshari20010558/Repository%20Sync/_git/Tru-Sync
     displayName: "Set Up Git Remotes"
 
   - script: |
-      echo "Fetching latest updates from Azure DevOps..."
+      echo "Fetching latest updates from both remotes..."
       
-      # Fetch all branches from Azure
+      # Fetch branches from both GitHub and Azure DevOps
+      git fetch github --prune
       git fetch azure --prune
+    displayName: "Fetch Updates from GitHub & Azure DevOps"
+
+  - script: |
+      echo "Syncing branches between Azure DevOps and GitHub..."
       
-      # Get all branch names from Azure
-      BRANCHES=$(git branch -r | grep 'azure/' | sed 's/azure\///')
+      # Get list of branches from both remotes
+      BRANCHES=$(git branch -r | grep -E 'azure/|github/' | sed -E 's/^[ ]+|azure\/|github\///g' | sort -u)
 
       for BRANCH in $BRANCHES; do
         echo "Processing branch: $BRANCH"
 
+        # Ensure the branch exists in both remotes
+        EXISTS_IN_AZURE=$(git branch -r | grep "azure/$BRANCH")
+        EXISTS_IN_GITHUB=$(git branch -r | grep "github/$BRANCH")
+
         # Checkout the branch locally
-        git checkout -B $BRANCH azure/$BRANCH || {
-          echo "Failed to checkout $BRANCH, skipping."
+        git checkout -B "$BRANCH" || {
+          echo "Failed to checkout $BRANCH, skipping..."
           continue
         }
 
-        # Pull latest changes
-        git pull --rebase azure $BRANCH || echo "No updates for $BRANCH from Azure."
+        # Sync from Azure to GitHub
+        if [ -n "$EXISTS_IN_AZURE" ]; then
+          echo "Pulling latest changes from Azure DevOps..."
+          git pull --rebase azure "$BRANCH" || echo "No updates from Azure."
+        fi
 
-        # Push to GitHub with the exact same branch name
-        if ! git push github $BRANCH; then
-          echo "Push failed for branch: $BRANCH. Skipping..."
-          continue
+        # Sync from GitHub to Azure
+        if [ -n "$EXISTS_IN_GITHUB" ]; then
+          echo "Pulling latest changes from GitHub..."
+          git pull --rebase github "$BRANCH" || echo "No updates from GitHub."
+        fi
+
+        # Push to both remotes to ensure full sync
+        if ! git push github "$BRANCH"; then
+          echo "Push to GitHub failed for branch: $BRANCH, skipping..."
+        fi
+        if ! git push azure "$BRANCH"; then
+          echo "Push to Azure failed for branch: $BRANCH, skipping..."
         fi
       done
-    displayName: "Sync All Azure DevOps Branches to GitHub"
+    displayName: "Bi-Directional Sync Between Azure DevOps & GitHub"
